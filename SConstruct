@@ -28,21 +28,21 @@
 #
 
 # print the welcome message
-print '****************************************'
-print '** Welcome to the build script of SWE **'
-print '****************************************'
-print 'SWE Copyright (C) 2012-2013'
-print ''
-print '  Technische Universitaet Muenchen'
-print '  Department of Informatics'
-print '  Chair of Scientific Computing'
-print '  http://www5.in.tum.de/SWE'
-print ''
-print 'SWE comes with ABSOLUTELY NO WARRANTY.'
-print 'SWE is free software, and you are welcome to redistribute it'
-print 'under certain conditions.'
-print 'Details can be found in the file \'gpl.txt\'.'
-print ''
+print ('****************************************')
+print ('** Welcome to the build script of SWE **')
+print ('****************************************')
+print ('SWE Copyright (C) 2012-2013')
+print ('')
+print ('  Technische Universitaet Muenchen')
+print ('  Department of Informatics')
+print ('  Chair of Scientific Computing')
+print ('  http://www5.in.tum.de/SWE')
+print ('')
+print ('SWE comes with ABSOLUTELY NO WARRANTY.')
+print ('SWE is free software, and you are welcome to redistribute it')
+print ('under certain conditions.')
+print ('Details can be found in the file \'gpl.txt\'.')
+print ('')
 
 import os
 import sys
@@ -267,6 +267,7 @@ if env['solver'] == 'fwave':
   env.Append(CPPDEFINES=['WAVE_PROPAGATION_SOLVER=1'])
 elif env['solver'] == 'augrie' or env['solver'] == 'augriefun':
   env.Append(CPPDEFINES=['WAVE_PROPAGATION_SOLVER=2'])
+  env.Append(CPPDEFINES=['SOLVER_AUGRIE'])
 elif env['solver'] == 'hybrid':
   env.Append(CPPDEFINES=['WAVE_PROPAGATION_SOLVER=0'])
 elif env['solver'] == 'fwavevec':
@@ -353,7 +354,7 @@ if env['asagi'] == True:
 
 # xml runtime parameters
 if env['xmlRuntime'] == True: #TODO
-  print 'xml runtime parameters are not implemented so far.'
+  print ('xml runtime parameters are not implemented so far.')
   Exit(1)
   env.Append(CPPDEFINES=['READXML'])
   #set xmllib2 location

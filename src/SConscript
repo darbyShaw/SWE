@@ -83,7 +83,7 @@ if env['writeNetCDF'] == True:
   sourceFiles.append( ['writer/NetCdfWriter.cpp'] )
 else:
   sourceFiles.append( ['writer/VtkWriter.cpp'] )
-
+  sourceFiles.append( ['writer/Writer.cpp'] )
 # xml reader
 if env['xmlRuntime'] == True:
   sourceFiles.append( ['tools/CXMLConfig.cpp'] )

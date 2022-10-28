@@ -30,7 +30,7 @@
 
 #if !defined(CUDA) 
 #if defined(SOLVER_FWAVE) || defined(SOLVER_AUGRIE) || defined(SOLVER_HLLE)
-#include "blocks/SWE_WaveAccumulationBlock.hh"
+#include "blocks/SWE_WavePropagationBlock.hh"
 #elif defined(SOLVER_RUSANOV)
 #include "blocks/rusanov/SWE_RusanovBlock.hh"
 #endif
@@ -55,7 +55,7 @@ extern SWE_Block* getCudaBlockInstance(float, float, float, float);
 SWE_Block* SWE_Block::getBlockInstance(float nx, float ny, float dx, float dy) {
   #if !defined(CUDA)
     #if defined(SOLVER_FWAVE) || defined(SOLVER_AUGRIE) || defined(SOLVER_HLLE)
-        SWE_Block *block = new SWE_WaveAccumulationBlock(nx, ny, dx,dy);
+        SWE_Block *block = new SWE_WavePropagationBlock(nx, ny, dx,dy);
     #elif defined(SOLVER_RUSANOV)
         SWE_Block *block = new SWE_RusanovBlock(nx,ny,dx,dy);
     #elif defined(SOLVER_AUGRIE_SIMD)
