@@ -91,6 +91,26 @@ SWE_WavePropagationBlock::SWE_WavePropagationBlock (int l_nx, int l_ny, float l_
 {
 }
 
+SWE_WavePropagationBlock::SWE_WavePropagationBlock (int l_nx,
+                                                    int l_ny,
+                                                    float l_dx,
+                                                    float l_dy,
+                                                    Float2D& l_h,
+                                                    Float2D& l_hu,
+                                                    Float2D& l_hv) :
+	SWE_Block (l_nx, l_ny, l_dx, l_dy, l_h, l_hu, l_hv),
+	hNetUpdatesLeft (nx + 1, ny),
+	hNetUpdatesRight (nx + 1, ny),
+	huNetUpdatesLeft (nx + 1, ny),
+	huNetUpdatesRight (nx + 1, ny),
+
+	hNetUpdatesBelow (nx, ny + 1),
+	hNetUpdatesAbove (nx, ny + 1),
+	hvNetUpdatesBelow (nx, ny + 1),
+	hvNetUpdatesAbove (nx, ny + 1)
+{
+}
+
 /**
  * Compute net updates for the block.
  * The member variable #maxTimestep will be updated with the 

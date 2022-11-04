@@ -96,6 +96,13 @@ private:
     //constructor of a SWE_WavePropagationBlock.
     SWE_WavePropagationBlock(int l_nx, int l_ny,
     					float l_dx, float l_dy);
+    SWE_WavePropagationBlock(int l_nx,
+                            int l_ny,
+                            float l_dx,
+                            float l_dy,
+                            Float2D& l_h,
+                            Float2D& l_hu,
+                            Float2D& l_hv);
 
     //computes the net-updates for the block
     void computeNumericalFluxes();

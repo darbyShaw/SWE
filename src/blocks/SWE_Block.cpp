@@ -67,6 +67,22 @@ SWE_Block* SWE_Block::getBlockInstance(float nx, float ny, float dx, float dy) {
   return block;
 }
 
+SWE_Block* SWE_Block::getBlockInstance(float nx, float ny, float dx, float dy,
+                                       Float2D &h, Float2D &hu, Float2D &hv) {
+  #if !defined(CUDA)
+    #if defined(SOLVER_FWAVE) || defined(SOLVER_AUGRIE) || defined(SOLVER_HLLE)
+        SWE_Block *block = new SWE_WavePropagationBlock(nx, ny, dx, dy, h, hu, hv);
+    #elif defined(SOLVER_RUSANOV)
+        SWE_Block *block = new SWE_RusanovBlock(nx,ny,dx,dy);
+    #elif defined(SOLVER_AUGRIE_SIMD)
+        #error "Not implemented yet!"
+    #endif
+  #else
+      SWE_Block *block = getCudaBlockInstance(nx, ny, dx,dy);
+  #endif
+  return block;
+}
+
 
 /**
  * Constructor: allocate variables for simulation
@@ -85,6 +101,21 @@ SWE_Block::SWE_Block(int l_nx, int l_ny,
 	: nx(l_nx), ny(l_ny),
 	  dx(l_dx), dy(l_dy),
 	  h(nx+2,ny+2), hu(nx+2,ny+2), hv(nx+2,ny+2), b(nx+2,ny+2),
+	  // This three are only set here, so eclipse does not complain
+	  maxTimestep(0), offsetX(0), offsetY(0)
+{
+  // set WALL as default boundary condition
+  for (int i=0; i<4; i++) {
+     boundary[i] = PASSIVE;
+     neighbour[i] = NULL;
+  };
+}
+
+SWE_Block::SWE_Block(int l_nx, int l_ny, float l_dx, float l_dy,
+           Float2D& l_h, Float2D& l_hu, Float2D& l_hv)
+	: nx(l_nx), ny(l_ny),
+	  dx(l_dx), dy(l_dy),
+	  h(l_h, true), hu(l_hu, true), hv(l_hv, true), b(nx+2, ny+2),
 	  // This three are only set here, so eclipse does not complain
 	  maxTimestep(0), offsetX(0), offsetY(0)
 {

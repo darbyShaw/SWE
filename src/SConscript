@@ -100,6 +100,8 @@ if env['parallelization'] in ['none', 'cuda']:
    Exit(1)
 elif env['parallelization'] in ['mpi_with_cuda', 'mpi']:
     sourceFiles.append( ['examples/swe_mpi.cpp'] )
+elif env['parallelization'] in ['gpi']:
+    sourceFiles.append( ['examples/swe_gpi.cpp'] )
 else:
   print >> sys.stderr, '** The selected configuration is not implemented.'
   Exit(1)

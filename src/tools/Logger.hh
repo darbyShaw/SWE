@@ -217,7 +217,7 @@ class tools::Logger {
      */
     std::ostream& cout() {
       return timeCout() << indentation
-        #ifdef USEMPI
+        #if defined(USEMPI) || defined(USEGPI)
         <<  "process " << processRank << " - "
         #endif
         ;

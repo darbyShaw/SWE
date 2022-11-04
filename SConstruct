@@ -77,7 +77,7 @@ vars.AddVariables(
               ),
               
   EnumVariable( 'parallelization', 'level of parallelization', 'none',
-                allowed_values=('none', 'cuda', 'mpi_with_cuda', 'mpi')
+                allowed_values=('none', 'cuda', 'mpi_with_cuda', 'mpi', 'gpi')
               ),
 
   EnumVariable( 'computeCapability', 'optional architecture/compute capability of the CUDA card', 'sm_20',
@@ -123,7 +123,8 @@ vars.AddVariables(
   PathVariable( 'libSDLDir', 'location of libSDL', None),
   PathVariable( 'netCDFDir', 'location of netCDF', None),
   PathVariable( 'asagiDir', 'location of ASAGI', None),
-  PathVariable( 'libxmlDir', 'location of libxml2', None)
+  PathVariable( 'libxmlDir', 'location of libxml2', None),
+  PathVariable( 'libGPI2Dir', 'location of libGPI2', None)
 )
 
 # set environment
@@ -265,6 +266,7 @@ env.Append(CPPPATH=['include'])
 # set the precompiler variables for the solver
 if env['solver'] == 'fwave':
   env.Append(CPPDEFINES=['WAVE_PROPAGATION_SOLVER=1'])
+  env.Append(CPPDEFINES=['SOLVER_FWAVE'])
 elif env['solver'] == 'augrie' or env['solver'] == 'augriefun':
   env.Append(CPPDEFINES=['WAVE_PROPAGATION_SOLVER=2'])
   env.Append(CPPDEFINES=['SOLVER_AUGRIE'])
@@ -322,6 +324,20 @@ if 'libSDLDir' in env:
   env.Append(CPPPATH=[env['libSDLDir']+'/include'])
   env.Append(LIBPATH=[env['libSDLDir']+'/lib'])
   env.Append(RPATH=[env['libSDLDir']+'/lib'])
+
+# set the compiler flags for libGPI2
+if 'libGPI2Dir' in env:
+  env.Append(CPPPATH=[env['libGPI2Dir']+'/include'])
+  env.Append(LIBPATH=[env['libGPI2Dir']+'/lib64'])
+  env.Append(RPATH=[env['libGPI2Dir']+'/lib64'])
+
+if env['parallelization'] in ['gpi']:
+  env.Append(CPPDEFINES=['USEGPI'])
+  if env['compileMode'] == 'debug':
+    env.Append(LIBS=['GPI2-dbg'])
+  else:
+    env.Append(LIBS=['GPI2'])
+
 
 # set the precompiler flags and includes for netCDF
 if env['writeNetCDF'] == True:
