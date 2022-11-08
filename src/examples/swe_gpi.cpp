@@ -283,18 +283,18 @@ int main( int argc, char** argv ) {
                                                  l_hv);
   
   //Bind the block to a gaspi segment
-  float *height = l_h.elemVector();
-  float *discharge_hu = l_hu.elemVector();
-  float *discharge_hv = l_hv.elemVector();
+  float *l_height = l_h.elemVector();
+  float *l_discharge_hu = l_hu.elemVector();
+  float *l_discharge_hv = l_hv.elemVector();
 
-  ASSERT(gaspi_segment_use(0, (gaspi_pointer_t) height,
-                           l_nXLocal * l_nYLocal * sizeof(float),
+  ASSERT(gaspi_segment_use(0, (gaspi_pointer_t) l_height,
+                           (l_nXLocal+2) * (l_nYLocal+2) * sizeof(float),
                            GASPI_GROUP_ALL, GASPI_BLOCK, 0));
-  ASSERT(gaspi_segment_use(1, (gaspi_pointer_t) discharge_hu,
-                           l_nXLocal * l_nYLocal * sizeof(float),
+  ASSERT(gaspi_segment_use(1, (gaspi_pointer_t) l_discharge_hu,
+                           (l_nXLocal+2) * (l_nYLocal+2) * sizeof(float),
                            GASPI_GROUP_ALL, GASPI_BLOCK, 0));
-  ASSERT(gaspi_segment_use(2, (gaspi_pointer_t) discharge_hv,
-                           l_nXLocal * l_nYLocal * sizeof(float),
+  ASSERT(gaspi_segment_use(2, (gaspi_pointer_t) l_discharge_hv,
+                           (l_nXLocal+2) * (l_nYLocal+2) * sizeof(float),
                            GASPI_GROUP_ALL, GASPI_BLOCK, 0));
 
   // initialize the wave propgation block
@@ -415,7 +415,7 @@ int main( int argc, char** argv ) {
                                 size_lr,
                                 l_gpiRank
                               );
-  ASSERT(gaspi_barrier(GASPI_GROUP_ALL, GASPI_BLOCK));
+  
   tools::Logger::logger.cout() << "Exchanged initial left right ghost layers." << std::endl;
   gaspi_segment_id_t *segment_id_bt = NULL;
   gaspi_size_t *size_bt = NULL;
@@ -518,7 +518,7 @@ int main( int argc, char** argv ) {
                                     size_lr,
                                     l_gpiRank
                                   );
-      ASSERT(gaspi_barrier(GASPI_GROUP_ALL, GASPI_BLOCK));
+      
       exchangeBottomTopGhostLayers( l_bottomNeighborRank, 
                                     l_nbottomInflowOffset,
                                     l_bottomInflowOffset,
@@ -631,7 +631,7 @@ gaspi_offset_t *calculateOffsets(Float2D& grid, BoundaryEdge edge, BoundaryType 
   int cols = grid.getCols(); /*nX*/
   float *base = grid.elemVector();
   gaspi_offset_t *offset = NULL;
-  //tools::Logger::logger.cout() << "rows = " << rows << " cols = " << cols << std::endl;
+  
   switch(edge)
   {
     case BND_LEFT:
@@ -640,12 +640,10 @@ gaspi_offset_t *calculateOffsets(Float2D& grid, BoundaryEdge edge, BoundaryType 
         float *first_ele = grid.getColProxy(1).elemVector();
         gaspi_offset_t start = first_ele - base;
         offset = (gaspi_offset_t *) calloc (rows, sizeof(gaspi_offset_t));
-        //tools::Logger::logger.cout() << "left outflow offsets = " << std::endl;
         for(int i = 0; i < rows; i++)
         {
           /*second row of grid*/
-          offset[i] = start + i;
-          //std::cout << offset[i] << "\t"; 
+          offset[i] = (start + i) * sizeof(float);
         }
       }
       else if (type == INFLOW)
@@ -653,11 +651,10 @@ gaspi_offset_t *calculateOffsets(Float2D& grid, BoundaryEdge edge, BoundaryType 
         float *first_ele = grid.getColProxy(0).elemVector();
         gaspi_offset_t start = first_ele - base;
         offset = (gaspi_offset_t *) calloc (rows, sizeof(gaspi_offset_t));
-        //tools::Logger::logger.cout() << "left inflow offsets = " << std::endl;
         for(int i = 0; i < rows; i++)
         {
           /*first row of grid*/
-          offset[i] = start + i;
+          offset[i] = (start + i) * sizeof(float);
           //std::cout << offset[i] << "\t"; 
         }
       }
@@ -668,12 +665,10 @@ gaspi_offset_t *calculateOffsets(Float2D& grid, BoundaryEdge edge, BoundaryType 
         float *first_ele = grid.getColProxy(cols-2).elemVector();
         gaspi_offset_t start = first_ele - base;
         offset = (gaspi_offset_t *) calloc (rows, sizeof(gaspi_offset_t));
-        //tools::Logger::logger.cout() << "right outflow offsets = " << std::endl;
         for(int i = 0; i < rows; i++)
         {
           /*second last row of grid*/
-          offset[i] = start + i; 
-          //std::cout << offset[i] << "\t";
+          offset[i] = (start + i) * sizeof(float); 
         }
       }
       else if (type == INFLOW)
@@ -681,12 +676,10 @@ gaspi_offset_t *calculateOffsets(Float2D& grid, BoundaryEdge edge, BoundaryType 
         float *first_ele = grid.getColProxy(cols-1).elemVector();
         gaspi_offset_t start = first_ele - base;
         offset = (gaspi_offset_t *) calloc (rows, sizeof(gaspi_offset_t));
-        //tools::Logger::logger.cout() << "right inflow offsets = " << std::endl;
         for(int i = 0; i < rows; i++)
         {
           /*Last row of grid*/
-          offset[i] = start + i; 
-          //std::cout << offset[i] << "\t";
+          offset[i] = (start + i) * sizeof(float); 
         }
       }
       break;
@@ -696,28 +689,22 @@ gaspi_offset_t *calculateOffsets(Float2D& grid, BoundaryEdge edge, BoundaryType 
         float *first_ele = grid.getRowProxy(1).elemVector();
         gaspi_offset_t start = first_ele - base;
         offset = (gaspi_offset_t *) calloc (cols, sizeof(gaspi_offset_t));
-        //tools::Logger::logger.cout() << "bottom outflow offsets = " << std::endl;
         for(int i = 0; i < cols; i++)
         {
           /*second col of grid*/
-          offset[i] = start + (rows)*i;
-          //std::cout << offset[i] << "\t"; 
+          offset[i] = (start + (rows)*i) * sizeof(float);
         }
-        //tools::Logger::logger.cout() << std::endl;
       }
       else if (type == INFLOW)
       {
         float *first_ele = grid.getRowProxy(0).elemVector();
         gaspi_offset_t start = first_ele - base;
         offset = (gaspi_offset_t *) calloc (cols, sizeof(gaspi_offset_t));
-        //tools::Logger::logger.cout() << "bottom inflow offsets = " << std::endl;
         for(int i = 0; i < cols; i++)
         {
           /*first col of grid*/
-          offset[i] = start + (rows)*i;
-          //std::cout << offset[i] << "\t"; 
+          offset[i] = (start + (rows)*i) * sizeof(float);
         }
-        //tools::Logger::logger.cout() << std::endl;
       }
       break;
     case BND_TOP:
@@ -726,28 +713,22 @@ gaspi_offset_t *calculateOffsets(Float2D& grid, BoundaryEdge edge, BoundaryType 
         float *first_ele = grid.getRowProxy(rows-2).elemVector();
         gaspi_offset_t start = first_ele - base;
         offset = (gaspi_offset_t *) calloc (cols, sizeof(gaspi_offset_t));
-        //tools::Logger::logger.cout() << "top outflow offsets = " << std::endl;
         for(int i = 0; i < cols; i++)
         {
-          /*second last row of grid*/
-          offset[i] = start + (rows)*i; 
-          //std::cout << offset[i] << "\t";
+          /*second last col of grid*/
+          offset[i] = (start + (rows)*i) * sizeof(float); 
         }
-        //tools::Logger::logger.cout() << std::endl;
       }
       else if (type == INFLOW)
       {
         float *first_ele = grid.getRowProxy(rows-1).elemVector();
         gaspi_offset_t start = first_ele - base;
         offset = (gaspi_offset_t *) calloc (cols, sizeof(gaspi_offset_t));
-        //tools::Logger::logger.cout() << "top inflow offsets = " << std::endl;
         for(int i = 0; i < cols; i++)
         {
-          /*Last row of grid*/
-          offset[i] = start + (rows)*i; 
-          std::cout << offset[i] << "\t";
+          /*Last col of grid*/
+          offset[i] = (start + (rows)*i) * sizeof(float); 
         }
-        //tools::Logger::logger.cout() << std::endl;
       }
       break;  
   }
