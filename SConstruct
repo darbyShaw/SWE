@@ -77,7 +77,7 @@ vars.AddVariables(
               ),
               
   EnumVariable( 'parallelization', 'level of parallelization', 'none',
-                allowed_values=('none', 'cuda', 'mpi_with_cuda', 'mpi', 'gpi')
+                allowed_values=('none', 'cuda', 'mpi_with_cuda', 'mpi', 'gpi', 'gpi_dynamic')
               ),
 
   EnumVariable( 'computeCapability', 'optional architecture/compute capability of the CUDA card', 'sm_20',
@@ -331,8 +331,9 @@ if 'libGPI2Dir' in env:
   env.Append(LIBPATH=[env['libGPI2Dir']+'/lib64'])
   env.Append(RPATH=[env['libGPI2Dir']+'/lib64'])
 
-if env['parallelization'] in ['gpi']:
+if env['parallelization'] in ['gpi', 'gpi_dynamic']:
   env.Append(CPPDEFINES=['USEGPI'])
+  env.Append(LIBS=['GPI2_pmix'])
   if env['compileMode'] == 'debug':
     env.Append(LIBS=['GPI2-dbg'])
   else:

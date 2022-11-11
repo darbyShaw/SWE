@@ -47,8 +47,8 @@ io::VtkWriter::VtkWriter( const std::string &i_baseName,
 		const BoundarySize &i_boundarySize,
 		int i_nX, int i_nY,
 		float i_dX, float i_dY,
-		int i_offsetX, int i_offsetY) :
-  io::Writer(i_baseName, i_b, i_boundarySize, i_nX, i_nY),
+		int i_offsetX, int i_offsetY, size_t i_timeStep) :
+  io::Writer(i_baseName, i_b, i_boundarySize, i_nX, i_nY, i_timeStep),
   dX(i_dX), dY(i_dY),
   offsetX(i_offsetX), offsetY(i_offsetY)
 {
@@ -75,8 +75,8 @@ void io::VtkWriter::writeTimeStep(
 			<< "<DataArray NumberOfComponents=\"3\" type=\"Float32\" format=\"ascii\">" << std::endl;
 
 	//Grid points
-	for (size_t j=0; j < nY+1; j++)
-	      for (size_t i=0; i < nX+1; i++)
+	for (size_t j=0; j < nY; j++)
+	      for (size_t i=0; i < nX; i++)
 	    	  vtkFile << (offsetX+i)*dX << " " << (offsetY+j)*dY <<" 0" << std::endl;
 
 	vtkFile << "</DataArray>" << std::endl
@@ -100,7 +100,7 @@ void io::VtkWriter::writeTimeStep(
 
 	vtkFile << "<DataArray Name=\"hv\" type=\"Float32\" format=\"ascii\">" << std::endl;
 	for (size_t j=1; j < nY+1; j++)
-		for (size_t i=1; i<nX+1; i++)
+		for (size_t i=1; i < nX+1; i++)
 			vtkFile << i_hv[i][j] << std::endl;
 	vtkFile << "</DataArray>" << std::endl;
 

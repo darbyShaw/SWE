@@ -82,7 +82,8 @@ public:
     static std::shared_ptr<Writer> createWriterInstance(std::string &fileName, const Float2D &bathymetry, 
                                                      const BoundarySize &boundarySize, int nX, int nY,
                                                      float dX, float dY, float offsetX, float offsetY,
-                                                     float originX, float originY, int flush);
+                                                     float originX, float originY, int flush,
+													 size_t timestep = 0);
 
 
     /**
@@ -91,12 +92,12 @@ public:
 	Writer(const std::string &i_fileName,
 		const Float2D &i_b,
 		const BoundarySize &i_boundarySize,
-		int i_nX, int i_nY)
+		int i_nX, int i_nY, size_t i_timeStep = 0)
 		: fileName(i_fileName),
 		  b(i_b),
 		  boundarySize(i_boundarySize),
 		  nX(i_nX), nY(i_nY),
-		  timeStep(0)
+		  timeStep(i_timeStep)
 	{
 	}
 
