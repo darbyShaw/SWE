@@ -33,6 +33,7 @@
 #include <cstdlib>
 #include <GASPI.h>
 #include <GASPI_Ext.h>
+#include <GPI2_Stats.h>
 #include <string>
 #include <vector>
 
@@ -50,6 +51,19 @@
 #include "tools/help.hh"
 #include "tools/Logger.hh"
 #include "tools/ProgressBar.hh"
+
+void success_or_exit (const char *file, const int line, const gaspi_return_t ec)
+{
+  if (ec != GASPI_SUCCESS)
+  {
+    tools::Logger::logger.cout() << "Assertion failed in " << file 
+                               << "[" << line << "]: Return " << ec 
+                               << ": " <<  gaspi_error_str (ec) << std::endl;
+    exit(EXIT_FAILURE);
+  }
+}
+
+#define ASSERT(ec)  success_or_exit (__FILE__, __LINE__, ec)
 
 typedef struct flow_info_t
 {
@@ -79,207 +93,105 @@ typedef struct flow_info_t
   gaspi_size_t *size_bt;
 } flow_info_t;
 
-void success_or_exit (const char *file, const int line, const gaspi_return_t ec)
+class GPI_SWE
 {
-  if (ec != GASPI_SUCCESS)
-  {
-    tools::Logger::logger.cout() << "Assertion failed in " << file 
-                               << "[" << line << "]: Return " << ec 
-                               << ": " <<  gaspi_error_str (ec) << std::endl;
-    exit(EXIT_FAILURE);
-  }
-}
+  public:
+  int computeNumberOfBlockRows (int i_numberOfProcesses);
+  void exchangeLeftRightGhostLayers ();
+  void exchangeBottomTopGhostLayers ();
+  gaspi_return_t recalculateRedistribute (int checkpt);
+  gaspi_offset_t *calculateOffsets (Float2D& grid, BoundaryEdge edge, BoundaryType type);
+  gaspi_return_t redistributeData (int l_oldRows, int l_oldCols);
+  void startComputation ();
+  std::ofstream *createFile (std::string type, int count);
+  void collectStepbyStepStats (int spawned_procs);
+  GPI_SWE (int argc, char** argv);
+  ~GPI_SWE ();
 
-#define ASSERT(ec)  success_or_exit (__FILE__, __LINE__, ec)
-
-/**
- * Compute the number of block rows from the total number of processes.
- *
- * The number of rows is determined as the square root of the
- * number of processes, if this is a square number;
- * otherwise, we use the largest number that is smaller than the square
- * root and still a divisor of the number of processes.
- *
- * @param numProcs number of process.
- * @return number of block rows
- */
-int computeNumberOfBlockRows(int i_numberOfProcesses) {
-  int l_numberOfRows = std::sqrt(i_numberOfProcesses);
-  while (i_numberOfProcesses % l_numberOfRows != 0) l_numberOfRows--;
-  return l_numberOfRows;
-}
-
-// Exchanges the left and right ghost layers.
-void exchangeLeftRightGhostLayers( flow_info_t &l_flow,
-                                   gaspi_rank_t l_gpiRank
-                                  );
-
-// Exchanges the bottom and top ghist layers.
-void exchangeBottomTopGhostLayers( flow_info_t &l_flow,
-                                   gaspi_rank_t l_gpiRank
-                                  );
-
-gaspi_return_t recalculateRedistribute(gaspi_rank_t l_gpiRank,
-                                       gaspi_rank_t l_numberOfProcesses,
-                                       SWE_BathymetryDamBreakScenario &l_scenario,
-                                       SWE_Block** l_waveBlock,
-                                       float **l_height,
-                                       float **l_discharge_hu,
-                                       float **l_discharge_hv,
-                                       int l_oldRows,
-                                       int l_oldCols,
-                                       flow_info_t &l_flow,
-                                       int l_nX,
-                                       int l_nY,
-                                       std::shared_ptr<io::Writer>& l_writer,
-                                       std::string& l_baseName, int checkpt);
-
-gaspi_offset_t *calculateOffsets(Float2D& grid, BoundaryEdge edge, BoundaryType type);
-gaspi_return_t redistributeData(float *l_height, float *l_discharge_hu, float *l_discharge_hv,
-                                int l_oldRows, int l_oldCols, int l_gpiRank);
-
-/**
- * Main program for the simulation on a single SWE_WavePropagationBlock or SWE_WaveAccumulationBlock.
- */
-int main( int argc, char** argv ) {
-  /**
-   * Initialization.
-   */
-  //! MPI Rank of a process.
+  private:
   gaspi_rank_t l_gpiRank;
-  //! number of MPI processes.
   gaspi_rank_t l_numberOfProcesses;
   flow_info_t l_flow;
-  float l_t = 0.0;
-  unsigned int l_iterations = 0;
-  int l_startc = 1;
-
-  // initialize MPI
+  float l_t;
+  unsigned int l_iterations;
+  int l_startc;
   gaspi_config_t config;
+  tools::Args args;
+  //! total number of grid cell in x- and y-direction.
+  int l_nX, l_nY;
+  //! l_baseName of the plots.
+  std::string l_baseName;
+  //! number of SWE_Blocks in x- and y-direction.
+  int l_blocksX, l_blocksY;
+  //! local position of each MPI process in x- and y-direction.
+  int l_blockPositionX, l_blockPositionY;
+  SWE_BathymetryDamBreakScenario l_scenario;
+  int l_numberOfCheckPoints;
+  //! number of grid cells in x- and y-direction per process.
+  int l_nXLocal, l_nYLocal;
+  int l_nXNormal, l_nYNormal;
+  //! size of a single cell in x- and y-direction
+  float l_dX, l_dY;
+  //! origin of the simulation domain in x- and y-direction
+  float l_originX, l_originY;
+  float *l_height, *l_discharge_hu, *l_discharge_hv;
+  SWE_Block *l_waveBlock;
+  int spawned;
+  float l_endSimulation;
+  float* l_checkPoints;
+  std::string l_fileName;
+  io::BoundarySize l_boundarySize;
+  std::shared_ptr<io::Writer> l_writer;
+  int argc;
+  char** argv;
+};
+
+GPI_SWE::GPI_SWE (int l_argc, char** l_argv) : 
+            l_t (0.0), l_iterations (0), l_startc (1), spawned (0),
+            l_boundarySize ({{1, 1, 1, 1}}), argc (l_argc), argv (l_argv) {
   ASSERT(gaspi_config_get(&config));
   config.queue_size_max = 1024;
   config.rw_list_elem_max = 1024;
   ASSERT(gaspi_config_set(config));
   ASSERT(gaspi_proc_init(GASPI_BLOCK));
-
-  // determine local MPI rank
-  gaspi_proc_rank(&l_gpiRank);
-  // determine total number of processes
-  gaspi_proc_num(&l_numberOfProcesses);
-  std::cout << "started process: " << l_gpiRank;
-  // initialize a logger for every MPI process
+  ASSERT(gaspi_proc_rank(&l_gpiRank));
+  ASSERT(gaspi_proc_num(&l_numberOfProcesses));
   tools::Logger::logger.setProcessRank(l_gpiRank);
-
-  // print the welcome message
   tools::Logger::logger.printWelcomeMessage();
-
   // set current wall clock time within the solver
   tools::Logger::logger.initWallClockTime(time(NULL));
-  //print the number of processes
   tools::Logger::logger.printNumberOfProcesses(l_numberOfProcesses);
-
-  // check if the necessary command line input parameters are given
-  tools::Args args;
-  
   args.addOption("grid-size-x", 'x', "Number of cell in x direction");
   args.addOption("grid-size-y", 'y', "Number of cell in y direction");
   args.addOption("output-basepath", 'o', "Output base file name");
   args.addOption("output-steps-count", 'c', "Number of output time steps");
-  
-#ifdef ASAGI
-  args.addOption("bathymetry-file", 'b', "File containing the bathymetry");
-  args.addOption("displacement-file", 'd', "File containing the displacement");
-  args.addOption("simul-area-min-x", 0, "Simulation area");
-  args.addOption("simul-area-max-x", 0, "Simulation area");
-  args.addOption("simul-area-min-y", 0, "Simulation area");
-  args.addOption("simul-area-max-y", 0, "Simulation area");
-  args.addOption("simul-duration", 0, "Simulation time in seconds");
-#endif
-
   tools::Args::Result ret = args.parse(argc, argv, l_gpiRank == 0);
-
   switch (ret)
   {
-  case tools::Args::Error:
-	  exit(EXIT_FAILURE);
-  case tools::Args::Help:
-	  ASSERT(gaspi_proc_term(GASPI_BLOCK));
-	  return 0;
-  default:
-      break;
+    case tools::Args::Error:
+      exit(EXIT_FAILURE);
+    case tools::Args::Help:
+      ASSERT(gaspi_proc_term(GASPI_BLOCK));
+      return;
+    default:
+        break;
   }
-
-  //! total number of grid cell in x- and y-direction.
-  int l_nX, l_nY;
-
-  //! l_baseName of the plots.
-  std::string l_baseName;
-
-  // read command line parameters
   l_nX = args.getArgument<int>("grid-size-x");
   l_nY = args.getArgument<int>("grid-size-y");
   l_baseName = args.getArgument<std::string>("output-basepath");
-
-  //! number of SWE_Blocks in x- and y-direction.
-  int l_blocksX, l_blocksY;
-
-  // determine the layout of MPI-ranks: use l_blocksX*l_blocksY grid blocks
-  /*Assume only column splits for simple data redistribution.*/
+  l_numberOfCheckPoints = args.getArgument<int>("output-steps-count");
   l_blocksY = l_numberOfProcesses;
   l_blocksX = l_numberOfProcesses/l_blocksY;
-
-  // print information about the grid
   tools::Logger::logger.printNumberOfCells(l_nX, l_nY);
   tools::Logger::logger.printNumberOfBlocks(l_blocksX, l_blocksY);
-
-  //! local position of each MPI process in x- and y-direction.
-  int l_blockPositionX, l_blockPositionY;
-
   // determine local block coordinates of each SWE_Block
   l_blockPositionX = l_gpiRank / l_blocksY;
   l_blockPositionY = l_gpiRank % l_blocksY;
-
-  #ifdef ASAGI
-  /*
-   * Pixel node registration used [Cartesian grid]
-   * Grid file format: nf = GMT netCDF format (float)  (COARDS-compliant)
-   * x_min: -500000 x_max: 6500000 x_inc: 500 name: x nx: 14000
-   * y_min: -2500000 y_max: 1500000 y_inc: 500 name: y ny: 8000
-   * z_min: -6.48760175705 z_max: 16.1780223846 name: z
-   * scale_factor: 1 add_offset: 0
-   * mean: 0.00217145586762 stdev: 0.245563641735 rms: 0.245573241263
-   */
-
-  //simulation area
-  float simulationArea[4];
-  simulationArea[0] = args.getArgument<float>("simul-area-min-x");
-  simulationArea[1] = args.getArgument<float>("simul-area-max-x");
-  simulationArea[2] = args.getArgument<float>("simul-area-min-y");
-  simulationArea[3] = args.getArgument<float>("simul-area-max-y");
-
-  float simulationDuration = args.getArgument<float>("simul-duration");
-
-  SWE_AsagiScenario l_scenario(args.getArgument<std::string>("bathymetry-file"), args.getArgument<std::string>("displacement-file"),
-                               simulationDuration, simulationArea);
-  #else
-  // create a simple artificial scenario
-  //SWE_RadialDamBreakScenario l_scenario;
-  SWE_BathymetryDamBreakScenario l_scenario;
-  #endif
-
-  //! number of checkpoints for visualization (at each checkpoint in time, an output file is written).
-  int l_numberOfCheckPoints = args.getArgument<int>("output-steps-count");
-
-  //! number of grid cells in x- and y-direction per process.
-  int l_nXLocal, l_nYLocal;
-  int l_nXNormal, l_nYNormal;
-
-  //! size of a single cell in x- and y-direction
-  float l_dX, l_dY;
-
   // compute local number of cells for each SWE_Block
-  l_nXLocal = (l_blockPositionX < l_blocksX-1) ? l_nX/l_blocksX : l_nX - (l_blocksX-1)*(l_nX/l_blocksX);
-  l_nYLocal = (l_blockPositionY < l_blocksY-1) ? l_nY/l_blocksY : l_nY - (l_blocksY-1)*(l_nY/l_blocksY);
+  l_nXLocal = (l_blockPositionX < l_blocksX-1) ? l_nX/l_blocksX : \
+                                  l_nX - (l_blocksX-1)*(l_nX/l_blocksX);
+  l_nYLocal = (l_blockPositionY < l_blocksY-1) ? l_nY/l_blocksY : \
+                                  l_nY - (l_blocksY-1)*(l_nY/l_blocksY);
   l_nXNormal = l_nX/l_blocksX;
   l_nYNormal = l_nY/l_blocksY;
 
@@ -290,31 +202,24 @@ int main( int argc, char** argv ) {
   // print information about the cell size and local number of cells
   tools::Logger::logger.printCellSize(l_dX, l_dY);
   tools::Logger::logger.printNumberOfCellsPerProcess(l_nXLocal, l_nYLocal);
-
-  //! origin of the simulation domain in x- and y-direction
-  float l_originX, l_originY;
-
   // get the origin from the scenario
   l_originX = l_scenario.getBoundaryPos(BND_LEFT) + l_blockPositionX*l_nXNormal*l_dX;;
   l_originY = l_scenario.getBoundaryPos(BND_BOTTOM) + l_blockPositionY*l_nYNormal*l_dY;
-
-  // create a single wave propagation block
   int rows = l_nXLocal+2;
   int cols = l_nYLocal+2;
-  float *l_height = new float[rows*cols];
-  float *l_discharge_hu = new float[rows*cols];
-  float *l_discharge_hv = new float[rows*cols];
+  l_height = new float[rows*cols];
+  l_discharge_hu = new float[rows*cols];
+  l_discharge_hv = new float[rows*cols];
   Float2D l_h(rows, cols, l_height);
   Float2D l_hu(rows, cols, l_discharge_hu);
   Float2D l_hv(rows, cols, l_discharge_hv);
-  auto l_waveBlock = SWE_Block::getBlockInstance(l_nXLocal,
-                                                 l_nYLocal, 
-                                                 l_dX, 
-                                                 l_dY,
-                                                 l_h,
-                                                 l_hu,
-                                                 l_hv);
-
+  l_waveBlock = SWE_Block::getBlockInstance(l_nXLocal,
+                                            l_nYLocal, 
+                                            l_dX, 
+                                            l_dY,
+                                            l_h,
+                                            l_hu,
+                                            l_hv);
   ASSERT(gaspi_segment_use(0, (gaspi_pointer_t) l_height,
                            (rows) * (cols) * sizeof(float),
                            GASPI_GROUP_ALL, GASPI_BLOCK, 0));
@@ -326,9 +231,6 @@ int main( int argc, char** argv ) {
                            GASPI_GROUP_ALL, GASPI_BLOCK, 0));
   l_waveBlock->initScenario(l_originX, l_originY, l_scenario, true);
   ASSERT(gaspi_barrier(GASPI_GROUP_ALL, GASPI_BLOCK));
-  /*If we are spawned, wait till we receive data from other procs,
-  else, initialize the wave propgation block*/
-  int spawned = 0;
   ASSERT(gaspi_spawned(&spawned));
   if(spawned)
   {
@@ -342,43 +244,25 @@ int main( int argc, char** argv ) {
     }
     ASSERT(gaspi_barrier(GASPI_GROUP_ALL, GASPI_BLOCK));
   }
-  
-  //! time when the simulation ends.
-  float l_endSimulation = l_scenario.endSimulation();
-
-  //! checkpoints when output files are written.
-  float* l_checkPoints = new float[l_numberOfCheckPoints+1];
-
-  // compute the checkpoints in time
+  l_endSimulation = l_scenario.endSimulation();
+  l_checkPoints = new float[l_numberOfCheckPoints+1];
   for(int cp = 0; cp <= l_numberOfCheckPoints; cp++) {
      l_checkPoints[cp] = cp*(l_endSimulation/l_numberOfCheckPoints);
   }
-
-  /*
-   * Connect SWE blocks at boundaries
-   */
-  // left and right boundaries
   if (l_blockPositionX == 0)
     l_waveBlock->setBoundaryType(BND_LEFT, OUTFLOW);
   if (l_blockPositionX == l_blocksX-1)
     l_waveBlock->setBoundaryType(BND_RIGHT, OUTFLOW);
-
-  // bottom and top boundaries
   if (l_blockPositionY == 0)
     l_waveBlock->setBoundaryType(BND_BOTTOM, OUTFLOW);
-
   if (l_blockPositionY == l_blocksY-1)
     l_waveBlock->setBoundaryType(BND_TOP, OUTFLOW);
-  
   l_flow.l_nleftOutflowOffset = l_waveBlock->getWaterHeight().getRows();
   l_flow.l_nleftInflowOffset = l_flow.l_nleftOutflowOffset;
   l_flow.l_nrightOutflowOffset = l_flow.l_nleftOutflowOffset;
   l_flow.l_nrightInflowOffset = l_flow.l_nleftOutflowOffset;
-  tools::Logger::logger.cout() << "Number of left right offsets " << l_flow.l_nleftOutflowOffset << std::endl;
-  tools::Logger::logger.printString("Connecting SWE blocks at left boundaries.");
   l_flow.l_leftOutflowOffset = calculateOffsets(l_h, BND_LEFT, OUTFLOW);
   l_flow.l_leftInflowOffset = calculateOffsets(l_h, BND_LEFT, INFLOW);
-  tools::Logger::logger.printString("Connecting SWE blocks at right boundaries.");
   l_flow.l_rightOutflowOffset = calculateOffsets(l_h, BND_RIGHT, OUTFLOW);
   l_flow.l_rightInflowOffset = calculateOffsets(l_h, BND_RIGHT, INFLOW);
 
@@ -386,86 +270,29 @@ int main( int argc, char** argv ) {
   l_flow.l_nbottomInflowOffset = l_flow.l_nbottomOutflowOffset;
   l_flow.l_ntopOutflowOffset = l_flow.l_nbottomOutflowOffset;
   l_flow.l_ntopInflowOffset = l_flow.l_nbottomOutflowOffset;
-  tools::Logger::logger.cout() << "Number of top bottom offsets " << l_flow.l_ntopOutflowOffset << std::endl;
-  tools::Logger::logger.printString("Connecting SWE blocks at bottom boundaries.");
   l_flow.l_bottomOutflowOffset = calculateOffsets(l_h, BND_BOTTOM, OUTFLOW);
   l_flow.l_bottomInflowOffset = calculateOffsets(l_h, BND_BOTTOM, INFLOW);
-  tools::Logger::logger.printString("Connecting SWE blocks at top boundaries.");
   l_flow.l_topOutflowOffset = calculateOffsets(l_h, BND_TOP, OUTFLOW);
   l_flow.l_topInflowOffset = calculateOffsets(l_h, BND_TOP, INFLOW);
-  /*
-   * The grid is stored column wise in memory:
-   *
-   *        ************************** . . . **********
-   *        *       *  ny+2 *2(ny+2)*         * (ny+1)*
-   *        *  ny+1 * +ny+1 * +ny+1 *         * (ny+2)*
-   *        *       *       *       *         * +ny+1 *
-   *        ************************** . . . **********
-   *        *       *       *       *         *       *
-   *        .       .       .       .         .       .
-   *        .       .       .       .         .       .
-   *        .       .       .       .         .       .
-   *        *       *       *       *         *       *
-   *        ************************** . . . **********
-   *        *       *  ny+2 *2(ny+2)*         * (ny+1)*
-   *        *   1   *   +1  *   +1  *         * (ny+2)*
-   *        *       *       *       *         *   +1  *
-   *        ************************** . . . **********
-   *        *       *  ny+2 *2(ny+2)*         * (ny+1)*
-   *        *   0   *   +0  *   +0  *         * (ny+2)*
-   *        *       *       *       *         *   +0  *
-   *        ************************** . . . ***********
-   *
-   *
-   *  -> The stride for a row is ny+2, because we have to jump over a whole column
-   *     for every row-element. This holds only in the CPU-version, in CUDA a buffer is implemented.
-   *     See SWE_BlockCUDA.hh/.cu for details.
-   *  -> The stride for a column is 1, because we can access the elements linear in memory.
-   */
 
-  //! MPI ranks of the neighbors
-  // compute MPI ranks of the neighbour processes
   l_flow.l_leftNeighborRank   = (l_blockPositionX > 0) ? l_gpiRank-l_blocksY : -1;
   l_flow.l_rightNeighborRank  = (l_blockPositionX < l_blocksX-1) ? l_gpiRank+l_blocksY : -1;
   l_flow.l_bottomNeighborRank = (l_blockPositionY > 0) ? l_gpiRank-1 : -1;
   l_flow.l_topNeighborRank    = (l_blockPositionY < l_blocksY-1) ? l_gpiRank+1 : -1;
 
-  // print the MPI grid
-  tools::Logger::logger.cout() << "neighbors: "
-                     << l_flow.l_leftNeighborRank << " (left), "
-                     << l_flow.l_rightNeighborRank << " (right), "
-                     << l_flow.l_bottomNeighborRank << " (bottom), "
-                     << l_flow.l_topNeighborRank << " (top)" << std::endl;
-
-  // intially exchange ghost and copy layers
-  l_flow.segment_id_lr = (gaspi_segment_id_t *) calloc (l_flow.l_nleftOutflowOffset, sizeof(gaspi_segment_id_t));
-  l_flow.size_lr = (gaspi_size_t *) calloc (l_flow.l_nleftOutflowOffset, sizeof(gaspi_size_t));
-  exchangeLeftRightGhostLayers( l_flow,
-                                l_gpiRank
-                              );
-  
-  tools::Logger::logger.cout() << "Exchanged initial left right ghost layers." << std::endl;
-  l_flow.segment_id_bt = (gaspi_segment_id_t *) calloc (l_flow.l_nbottomOutflowOffset, sizeof(gaspi_segment_id_t));
-  l_flow.size_bt = (gaspi_size_t *) calloc (l_flow.l_nbottomOutflowOffset, sizeof(gaspi_size_t));
-  exchangeBottomTopGhostLayers( l_flow,
-                                l_gpiRank
-                              );
+  l_flow.segment_id_lr = (gaspi_segment_id_t *) calloc (l_flow.l_nleftOutflowOffset,
+                                                        sizeof(gaspi_segment_id_t));
+  l_flow.size_lr = (gaspi_size_t *) calloc (l_flow.l_nleftOutflowOffset, 
+                                            sizeof(gaspi_size_t));
+  exchangeLeftRightGhostLayers();
+  l_flow.segment_id_bt = (gaspi_segment_id_t *) calloc (l_flow.l_nbottomOutflowOffset,
+                                                        sizeof(gaspi_segment_id_t));
+  l_flow.size_bt = (gaspi_size_t *) calloc (l_flow.l_nbottomOutflowOffset,
+                                            sizeof(gaspi_size_t));
+  exchangeBottomTopGhostLayers();
   ASSERT(gaspi_barrier(GASPI_GROUP_ALL, GASPI_BLOCK));
-  tools::Logger::logger.cout() << "Exchanged initial top bottom ghost layers." << std::endl;
-  // Init fancy progressbar
-  tools::ProgressBar progressBar(l_endSimulation, l_gpiRank);
-
-  // write the output at time zero
   tools::Logger::logger.printOutputTime(0);
-  progressBar.update(0.);
-
-  std::string l_fileName = generateBaseFileName(l_baseName,l_blockPositionX,l_blockPositionY);
-  //boundary size of the ghost layers
-  io::BoundarySize l_boundarySize = {{1, 1, 1, 1}};
-  //
-  // Write zero time step
-  /*Synchronize iterations, checkpoints and time steps*/
-  std::shared_ptr<io::Writer> l_writer;
+  l_fileName = generateBaseFileName(l_baseName,l_blockPositionX,l_blockPositionY);
   if(spawned)
   {
     gaspi_allreduce(&l_t, &l_t, 1,
@@ -477,6 +304,7 @@ int main( int argc, char** argv ) {
     gaspi_allreduce(&l_startc, &l_startc, 1,
                     GASPI_OP_MAX, GASPI_TYPE_INT,
                     GASPI_GROUP_ALL, GASPI_BLOCK);
+    collectStepbyStepStats (l_numberOfProcesses/2);
     l_writer = io::Writer::createWriterInstance(
           l_fileName,
           l_waveBlock->getBathymetry(),
@@ -498,124 +326,174 @@ int main( int argc, char** argv ) {
           l_blockPositionX*l_nXLocal, l_blockPositionY*l_nYLocal,
           l_originX, l_originY,
           0);
-    l_writer->writeTimeStep( l_waveBlock->getWaterHeight(),
+    /*l_writer->writeTimeStep( l_waveBlock->getWaterHeight(),
                             l_waveBlock->getDischarge_hu(),
                             l_waveBlock->getDischarge_hv(),
-                            (float) l_t);
+                            (float) l_t);*/
+    tools::Logger::logger.printStartMessage();
   }
-  /**
-   * Simulation.
-   */
-  // print the start message and reset the wall clock time
-  progressBar.clear();
-  tools::Logger::logger.printStartMessage();
+}
+
+
+int GPI_SWE::computeNumberOfBlockRows(int i_numberOfProcesses) {
+  return i_numberOfProcesses;
+}
+
+std::ofstream *GPI_SWE::createFile (std::string typeFile, int count)
+{
+  std::ostringstream l_file;
+  l_file << l_baseName << "_" << typeFile << "_" << count << ".txt";
+  std::string tempName = l_file.str();
+  std::ofstream *newFile = new std::ofstream(tempName.c_str());
+  assert(newFile->good());
+  return newFile;
+}
+
+void GPI_SWE::collectStepbyStepStats (int spawned_procs)
+{
+  /*First collect the time required to spawn new procs*/
+  float spawn_time = 0;
+  if (l_gpiRank == 0)
+  {
+    spawn_time = GPI2_STATS_GET_TIMER (GASPI_SPAWN_TIMER)/1000;
+    std::ofstream *spawnFile = createFile ("spawn_time", spawned_procs);
+    *spawnFile << spawn_time << std::endl;
+    GPI2_STATS_RESET_TIMER (GASPI_SPAWN_TIMER);
+  }
+  /*Collect the time required for all procs to be notified of the
+  completion of spawned procs. This includes the time required to
+  spawn the procs.*/
+  float init_resource_change = GPI2_STATS_GET_TIMER (GASPI_INIT_RESOURCE_CHANGE_TIMER)/1000;
+  /*Average it out over the procs involved*/
+  float total_resource_change = 0;
+  gaspi_allreduce(&init_resource_change, &total_resource_change, 1,
+                  GASPI_OP_SUM, GASPI_TYPE_FLOAT, GASPI_GROUP_ALL, GASPI_BLOCK);
+  if (l_gpiRank == 0)
+  {
+    total_resource_change /= spawned_procs;
+    std::ofstream *spawnFile = createFile ("init_resource_change_time", spawned_procs);
+    *spawnFile << total_resource_change << std::endl;
+  }
+  GPI2_STATS_RESET_TIMER (GASPI_INIT_RESOURCE_CHANGE_TIMER);
+  /*Collect the time required to construct a PMIx Group.*/
+  float group_construct = GPI2_STATS_GET_TIMER (GASPI_GROUP_CONSTRUCT_TIMER)/1000;
+  /*Average it out over the procs involved*/
+  float total_group_construct = 0;
+  gaspi_allreduce(&group_construct, &total_group_construct, 1,
+                  GASPI_OP_SUM, GASPI_TYPE_FLOAT, GASPI_GROUP_ALL, GASPI_BLOCK);
+  if (l_gpiRank == 0)
+  {
+    total_group_construct /= l_numberOfProcesses;
+    std::ofstream *spawnFile = createFile ("group_construct", spawned_procs);
+    *spawnFile << total_group_construct << std::endl;
+  }
+  GPI2_STATS_RESET_TIMER (GASPI_GROUP_CONSTRUCT_TIMER);
+  /*Collect the time required to init/reinit gaspi core.*/
+  float init_core = GPI2_STATS_GET_TIMER (GASPI_CORE_CONTEXT_INIT_TIMER)/1000;
+  /*Average it out over the procs involved*/
+  float total_init_core = 0;
+  gaspi_allreduce(&init_core, &total_init_core, 1,
+                  GASPI_OP_SUM, GASPI_TYPE_FLOAT, GASPI_GROUP_ALL, GASPI_BLOCK);
+  if (l_gpiRank == 0)
+  {
+    total_init_core /= l_numberOfProcesses;
+    std::ofstream *spawnFile = createFile ("init_reinit_core", spawned_procs);
+    *spawnFile << total_init_core << std::endl;
+  }
+  GPI2_STATS_RESET_TIMER (GASPI_CORE_CONTEXT_INIT_TIMER);
+  /*Collect the time required to create gaspi groups and dynamic connections.*/
+  float gaspi_grp_conn = GPI2_STATS_GET_TIMER (GASPI_CONNECTION_GROUP_CREATION_TIMER)/1000;
+  /*Average it out over the procs involved*/
+  float total_gaspi_grp_conn = 0;
+  gaspi_allreduce(&gaspi_grp_conn, &total_gaspi_grp_conn, 1,
+                  GASPI_OP_SUM, GASPI_TYPE_FLOAT, GASPI_GROUP_ALL, GASPI_BLOCK);
+  if (l_gpiRank == 0)
+  {
+    total_gaspi_grp_conn /= l_numberOfProcesses;
+    std::ofstream *spawnFile = createFile ("gaspi_group_create_conn", spawned_procs);
+    *spawnFile << total_gaspi_grp_conn << std::endl;
+  }
+  GPI2_STATS_RESET_TIMER (GASPI_CONNECTION_GROUP_CREATION_TIMER);
+  /*Collect the total resource change time.*/
+  float total_time = GPI2_STATS_GET_TIMER (GASPI_TOTAL_RESOURCE_CHANGE_TIME)/1000;
+  /*Average it out over the procs involved*/
+  float sum_total_time = 0;
+  gaspi_allreduce(&total_time, &sum_total_time, 1,
+                  GASPI_OP_SUM, GASPI_TYPE_FLOAT, GASPI_GROUP_ALL, GASPI_BLOCK);
+  if (l_gpiRank == 0)
+  {
+    sum_total_time /= l_numberOfProcesses;
+    std::ofstream *spawnFile = createFile ("reconf", spawned_procs);
+    *spawnFile << sum_total_time << std::endl;
+  }
+  GPI2_STATS_RESET_TIMER (GASPI_TOTAL_RESOURCE_CHANGE_TIME);
+}
+
+void GPI_SWE::startComputation ()
+{
   tools::Logger::logger.initWallClockTime(time(NULL));
-
-  //! simulation time.
-  
-  progressBar.update(l_t);
-  
   // loop over checkpoints
-  for(int c=l_startc; c<=l_numberOfCheckPoints; c++) {
-
-    // do time steps until next checkpoint is reached
+  double l_lastIterTime = 0;
+  double l_lastCheckTime = 0;
+  for(int c=l_startc; c<=l_numberOfCheckPoints; c++) {  
+    std::ofstream *iterFile = createFile ("iterations", c); 
+    std::ofstream *checkFile = createFile ("checkpoint", c);
     while( l_t < l_checkPoints[c] ) {
-      //reset CPU-Communication clock
-      tools::Logger::logger.resetClockToCurrentTime("CpuCommunication");
-
-      // exchange ghost and copy layers
-      exchangeLeftRightGhostLayers( l_flow,
-                                    l_gpiRank
-                                  );
-      
-      exchangeBottomTopGhostLayers( l_flow,
-                                    l_gpiRank
-                                  );
-      ASSERT(gaspi_barrier(GASPI_GROUP_ALL, GASPI_BLOCK));
-      // reset the cpu clock
       tools::Logger::logger.resetClockToCurrentTime("Cpu");
-
-      // set values in ghost cells
+      exchangeLeftRightGhostLayers ();
+      exchangeBottomTopGhostLayers ();
+      ASSERT(gaspi_barrier(GASPI_GROUP_ALL, GASPI_BLOCK));
       l_waveBlock->setGhostLayer();
-
-      // compute numerical flux on each edge
       l_waveBlock->computeNumericalFluxes();
-
-      //! maximum allowed time step width within a block.
       float l_maxTimeStepWidth = l_waveBlock->getMaxTimestep();
-
-      // update the cpu time in the logger
-      tools::Logger::logger.updateTime("Cpu");
-
-      //! maximum allowed time steps of all blocks
       float l_maxTimeStepWidthGlobal;
-
-      // determine smallest time step of all blocks
       gaspi_allreduce(&l_maxTimeStepWidth, &l_maxTimeStepWidthGlobal, 1,
                       GASPI_OP_MIN, GASPI_TYPE_FLOAT, GASPI_GROUP_ALL, GASPI_BLOCK);
-
-      // reset the cpu time
-      tools::Logger::logger.resetClockToCurrentTime("Cpu");
-
-      // update the cell values
       l_waveBlock->updateUnknowns(l_maxTimeStepWidthGlobal);
-
-      // update the cpu and CPU-communication time in the logger
       tools::Logger::logger.updateTime("Cpu");
-      tools::Logger::logger.updateTime("CpuCommunication");
-
-      // update simulation time with time step width.
       l_t += l_maxTimeStepWidthGlobal;
       l_iterations++;
-
+      /*Compute average time spent per iteration for overall computation.*/
+      double l_iterTime = tools::Logger::logger.getTime("Cpu") - l_lastIterTime;
+      l_lastIterTime = tools::Logger::logger.getTime("Cpu");
+      double l_sumIterTime = 0;
+      gaspi_allreduce(&l_iterTime, &l_sumIterTime, 1,
+                      GASPI_OP_SUM, GASPI_TYPE_DOUBLE, GASPI_GROUP_ALL, GASPI_BLOCK);
+      if (l_gpiRank == 0)
+      {
+        l_sumIterTime /= l_numberOfProcesses;
+        *iterFile << l_sumIterTime << std::endl;
+      }
       // print the current simulation time
-      progressBar.clear();
       tools::Logger::logger.printSimulationTime(l_t);
-      progressBar.update(l_t);
+    }
+    /*Compute total simulation time spent per checkpoint.*/
+    double l_sumCheckTime = 0, l_checkTime;
+    l_checkTime = l_lastIterTime - l_lastCheckTime;
+    l_lastCheckTime = l_lastIterTime;
+    gaspi_allreduce(&l_checkTime, &l_sumCheckTime, 1,
+                    GASPI_OP_SUM, GASPI_TYPE_DOUBLE, GASPI_GROUP_ALL, GASPI_BLOCK);
+    if (l_gpiRank == 0)
+    {
+      l_sumCheckTime /= l_numberOfProcesses;
+      *checkFile << l_sumCheckTime << std::endl;
     }
 
-    // print current simulation time
-    progressBar.clear();
-    tools::Logger::logger.printOutputTime(l_t);
-    progressBar.update(l_t);
-
     // write output
-    l_writer->writeTimeStep( l_waveBlock->getWaterHeight(),
-                            l_waveBlock->getDischarge_hu(),
-                            l_waveBlock->getDischarge_hv(),
-                            l_t);
+    /*l_writer->writeTimeStep (l_waveBlock->getWaterHeight(),
+                             l_waveBlock->getDischarge_hu(),
+                             l_waveBlock->getDischarge_hv(),
+                             l_t);*/
     /*We want to now add more resources to the computation.
     We request l_numberOfProcesses of additional processes.*/
-    ASSERT(gaspi_segment_delete(0));
-    ASSERT(gaspi_segment_delete(1));
-    ASSERT(gaspi_segment_delete(2));
-    if(c+1 <= l_numberOfCheckPoints)
+    //if(c+1 == 5 || c+1 == 9 || c+1 == 13)
+    if (c+1 <= l_numberOfCheckPoints)
     {
-      tools::Logger::logger.cout() << "Allocating " << l_numberOfProcesses 
-                    << " procs with group name " << argv[0] << std::endl;
       ASSERT(gaspi_proc_alloc_request(l_numberOfProcesses,
                                       &l_gpiRank, 
                                       &l_numberOfProcesses,
                                       argc, argv));
-      tools::Logger::logger.cout() << "We now have " << l_numberOfProcesses << " processes."
-                                    << std::endl;;
-      /*Now we recalculate all metadata and redistribute data.*/
-      ASSERT(recalculateRedistribute(l_gpiRank,
-                                    l_numberOfProcesses,
-                                    l_scenario,
-                                    &l_waveBlock,
-                                    &l_height,
-                                    &l_discharge_hu,
-                                    &l_discharge_hv,
-                                    l_nXLocal,
-                                    l_nYLocal,
-                                    l_flow,
-                                    l_nX,
-                                    l_nY,
-                                    l_writer,
-                                    l_baseName, c));
-      l_nXLocal = l_waveBlock->getNx();
-      l_nYLocal = l_waveBlock->getNy();
+      ASSERT(recalculateRedistribute (c));
       gaspi_allreduce(&l_t, &l_t, 1,
                       GASPI_OP_MAX, GASPI_TYPE_FLOAT,
                       GASPI_GROUP_ALL, GASPI_BLOCK);
@@ -626,48 +504,29 @@ int main( int argc, char** argv ) {
       gaspi_allreduce(&send_startc, &l_startc, 1,
                       GASPI_OP_MAX, GASPI_TYPE_INT,
                       GASPI_GROUP_ALL, GASPI_BLOCK);
+      collectStepbyStepStats (l_numberOfProcesses/2);
     }
   }
+}
 
-  /**
-   * Finalize.
-   */
-#ifdef ASAGI
-  // Free ASAGI resources
-  l_scenario.deleteGrids();
-#endif
-
-  progressBar.clear();
-
-  // write the statistics message
-  tools::Logger::logger.printStatisticsMessage();
-
-  // print the cpu time
-  tools::Logger::logger.printTime("Cpu", "CPU time");
-
-  // print CPU + Communication time
-  tools::Logger::logger.printTime("CpuCommunication", "CPU + Communication time");
-
-  // print the wall clock time (includes plotting)
-  tools::Logger::logger.printWallClockTime(time(NULL));
-
-  // printer iteration counter
-  tools::Logger::logger.printIterationsDone(l_iterations);
-
-  // print the finish message
-  tools::Logger::logger.printFinishMessage();
-
-  // Dispose of the SWE block!
+GPI_SWE::~GPI_SWE ()
+{
   delete l_waveBlock;
-
-  // finalize MPI execution
+  tools::Logger::logger.printFinishMessage();
+  ASSERT(gaspi_barrier(GASPI_GROUP_ALL, GASPI_BLOCK));
   ASSERT(gaspi_proc_term(GASPI_BLOCK));
+}
 
+/**
+ * Main program for the simulation on a single SWE_WavePropagationBlock or SWE_WaveAccumulationBlock.
+ */
+int main (int argc, char** argv) {
+  GPI_SWE l_gpiSwe (argc, argv);
+  l_gpiSwe.startComputation ();
   return 0;
 }
 
-gaspi_return_t redistributeData(float *l_height, float *l_discharge_hu, float *l_discharge_hv,
-                                int l_oldRows, int l_oldCols, gaspi_rank_t l_gpiRank)
+gaspi_return_t GPI_SWE::redistributeData(int l_oldRows, int l_oldCols)
 {
   /*The data before resource addition is present in the above arguments.
   Here, we assume that old and new process ranks are the same.*/
@@ -751,81 +610,39 @@ gaspi_return_t redistributeData(float *l_height, float *l_discharge_hu, float *l
   return GASPI_SUCCESS;
 }
 
-gaspi_return_t recalculateRedistribute(gaspi_rank_t l_gpiRank,
-                                       gaspi_rank_t l_numberOfProcesses,
-                                       SWE_BathymetryDamBreakScenario &l_scenario,
-                                       SWE_Block** l_waveBlock,
-                                       float **l_height,
-                                       float **l_discharge_hu,
-                                       float **l_discharge_hv,
-                                       int l_oldRows,
-                                       int l_oldCols,
-                                       flow_info_t &l_flow,
-                                       int l_nX,
-                                       int l_nY,
-                                       std::shared_ptr<io::Writer>& l_writer,
-                                       std::string& l_baseName, int checkpoint)
+gaspi_return_t GPI_SWE::recalculateRedistribute (int checkpoint)
 {
+  int l_oldRows = l_nXLocal;
+  int l_oldCols = l_nYLocal;
   tools::Logger::logger.setProcessRank(l_gpiRank);
-  int l_blocksX, l_blocksY;
-
-  /*We assume splitting the x-axis according to the available
-  processes for ease of data redistribution.*/
   l_blocksY = l_numberOfProcesses;
   l_blocksX = l_numberOfProcesses/l_blocksY;
-
-  int l_blockPositionX, l_blockPositionY;
-
-  // determine local block coordinates of each SWE_Block
   l_blockPositionX = l_gpiRank / l_blocksY;
   l_blockPositionY = l_gpiRank % l_blocksY;
-
-  //! number of grid cells in x- and y-direction per process.
-  int l_nXLocal, l_nYLocal;
-  int l_nXNormal, l_nYNormal;
-
-  //! size of a single cell in x- and y-direction
-  float l_dX, l_dY;
-
-  // compute local number of cells for each SWE_Block
   l_nXLocal = (l_blockPositionX < l_blocksX-1) ? l_nX/l_blocksX : l_nX - (l_blocksX-1)*(l_nX/l_blocksX);
   l_nYLocal = (l_blockPositionY < l_blocksY-1) ? l_nY/l_blocksY : l_nY - (l_blocksY-1)*(l_nY/l_blocksY);
   l_nXNormal = l_nX/l_blocksX;
   l_nYNormal = l_nY/l_blocksY;
-
-  // compute the size of a single cell
   l_dX = (l_scenario.getBoundaryPos(BND_RIGHT) - l_scenario.getBoundaryPos(BND_LEFT) )/l_nX;
   l_dY = (l_scenario.getBoundaryPos(BND_TOP) - l_scenario.getBoundaryPos(BND_BOTTOM) )/l_nY;
-  float l_originX, l_originY;
-
-  // get the origin from the scenario
   l_originX = l_scenario.getBoundaryPos(BND_LEFT) + l_blockPositionX*l_nXNormal*l_dX;;
   l_originY = l_scenario.getBoundaryPos(BND_BOTTOM) + l_blockPositionY*l_nYNormal*l_dY;
-
-  // create a single wave propagation block
-  /*We create new blocks, redistribute data, delete old blocks and
-  assign new block pointers to passed pointers.
-  */
   int rows = l_nXLocal+2;
   int cols = l_nYLocal+2;
-  
   float *new_height = new float[rows*cols];
   float *new_discharge_hu = new float[rows*cols];
   float *new_discharge_hv = new float[rows*cols];
-
   Float2D l_h(rows, cols, new_height);
   Float2D l_hu(rows, cols, new_discharge_hu);
   Float2D l_hv(rows, cols, new_discharge_hv);
-  delete(*l_waveBlock);
-  *l_waveBlock = SWE_Block::getBlockInstance(l_nXLocal,
-                                             l_nYLocal, 
-                                             l_dX, 
-                                             l_dY,
-                                             l_h,
-                                             l_hu,
-                                             l_hv);
-  tools::Logger::logger.cout() << "Waiting for segments to get created " << std::endl;
-  std::cout.flush();
+  delete(l_waveBlock);
+  l_waveBlock = SWE_Block::getBlockInstance(l_nXLocal,
+                                            l_nYLocal, 
+                                            l_dX, 
+                                            l_dY,
+                                            l_h,
+                                            l_hu,
+                                            l_hv);
   ASSERT(gaspi_segment_use(0, (gaspi_pointer_t) new_height,
                            (rows) * (cols) * sizeof(float),
                            GASPI_GROUP_ALL, GASPI_BLOCK, 0));
@@ -836,107 +653,80 @@ gaspi_return_t recalculateRedistribute(gaspi_rank_t l_gpiRank,
                            (rows) * (cols) * sizeof(float),
                            GASPI_GROUP_ALL, GASPI_BLOCK, 0));
   
-  SWE_Block* l_newWaveBlock = *l_waveBlock;
-  l_newWaveBlock->initScenario(l_originX, l_originY, l_scenario, true);
-  tools::Logger::logger.cout() << "Waiting for segments to get created " << std::endl;
-  std::cout.flush();
+  l_waveBlock->initScenario(l_originX, l_originY, l_scenario, true);
   ASSERT(gaspi_barrier(GASPI_GROUP_ALL, GASPI_BLOCK));
-  tools::Logger::logger.cout() << "Segments have been created with rows " 
-                               << rows << " and cols " << cols << std::endl;
   /*Now all procs have created new memory segments.
   We want to begin redistributing data*/
-  ASSERT(redistributeData(*l_height, *l_discharge_hu, *l_discharge_hv,
-                          l_oldRows, l_oldCols, l_gpiRank));
-  tools::Logger::logger.cout() << "Data has been redistributed " << std::endl;
+  ASSERT(redistributeData(l_oldRows, l_oldCols));
+
   /*After redistributing data, we can delete old pointers.*/
-  free(*l_height);
-  free(*l_discharge_hu);
-  free(*l_discharge_hv);
-  *l_height = new_height;
-  *l_discharge_hu = new_discharge_hu;
-  *l_discharge_hv = new_discharge_hv;
+  free(l_height);
+  free(l_discharge_hu);
+  free(l_discharge_hv);
+  l_height = new_height;
+  l_discharge_hu = new_discharge_hu;
+  l_discharge_hv = new_discharge_hv;
   
   if (l_blockPositionX == 0)
-    l_newWaveBlock->setBoundaryType(BND_LEFT, OUTFLOW);
+    l_waveBlock->setBoundaryType(BND_LEFT, OUTFLOW);
   if (l_blockPositionX == l_blocksX-1)
-    l_newWaveBlock->setBoundaryType(BND_RIGHT, OUTFLOW);
-
-  // bottom and top boundaries
+    l_waveBlock->setBoundaryType(BND_RIGHT, OUTFLOW);
   if (l_blockPositionY == 0)
-    l_newWaveBlock->setBoundaryType(BND_BOTTOM, OUTFLOW);
-
+    l_waveBlock->setBoundaryType(BND_BOTTOM, OUTFLOW);
   if (l_blockPositionY == l_blocksY-1)
-    l_newWaveBlock->setBoundaryType(BND_TOP, OUTFLOW);
+    l_waveBlock->setBoundaryType(BND_TOP, OUTFLOW);
   
-  l_flow.l_nleftOutflowOffset = l_newWaveBlock->getWaterHeight().getRows();
+  l_flow.l_nleftOutflowOffset = l_waveBlock->getWaterHeight().getRows();
   l_flow.l_nleftInflowOffset = l_flow.l_nleftOutflowOffset;
   l_flow.l_nrightOutflowOffset = l_flow.l_nleftOutflowOffset;
   l_flow.l_nrightInflowOffset = l_flow.l_nleftOutflowOffset;
-  tools::Logger::logger.cout() << "Number of left right offsets " << l_flow.l_nleftOutflowOffset << std::endl;
-  tools::Logger::logger.printString("Connecting SWE blocks at left boundaries.");
   free(l_flow.l_leftOutflowOffset);
   free(l_flow.l_leftInflowOffset);
   l_flow.l_leftOutflowOffset = calculateOffsets(l_h, BND_LEFT, OUTFLOW);
   l_flow.l_leftInflowOffset = calculateOffsets(l_h, BND_LEFT, INFLOW);
-  tools::Logger::logger.printString("Connecting SWE blocks at right boundaries.");
   free(l_flow.l_rightOutflowOffset);
   free(l_flow.l_rightInflowOffset);
   l_flow.l_rightOutflowOffset = calculateOffsets(l_h, BND_RIGHT, OUTFLOW);
   l_flow.l_rightInflowOffset = calculateOffsets(l_h, BND_RIGHT, INFLOW);
 
-  l_flow.l_nbottomOutflowOffset = l_newWaveBlock->getWaterHeight().getCols();
+  l_flow.l_nbottomOutflowOffset = l_waveBlock->getWaterHeight().getCols();
   l_flow.l_nbottomInflowOffset = l_flow.l_nbottomOutflowOffset;
   l_flow.l_ntopOutflowOffset = l_flow.l_nbottomOutflowOffset;
   l_flow.l_ntopInflowOffset = l_flow.l_nbottomOutflowOffset;
-  tools::Logger::logger.cout() << "Number of top bottom offsets " << l_flow.l_ntopOutflowOffset << std::endl;
-  tools::Logger::logger.printString("Connecting SWE blocks at bottom boundaries.");
   free(l_flow.l_bottomOutflowOffset);
   free(l_flow.l_bottomInflowOffset);
   l_flow.l_bottomOutflowOffset = calculateOffsets(l_h, BND_BOTTOM, OUTFLOW);
   l_flow.l_bottomInflowOffset = calculateOffsets(l_h, BND_BOTTOM, INFLOW);
-  tools::Logger::logger.printString("Connecting SWE blocks at top boundaries.");
   free(l_flow.l_topOutflowOffset);
   free(l_flow.l_topInflowOffset);
   l_flow.l_topOutflowOffset = calculateOffsets(l_h, BND_TOP, OUTFLOW);
   l_flow.l_topInflowOffset = calculateOffsets(l_h, BND_TOP, INFLOW);
 
-  // compute MPI ranks of the neighbour processes
   l_flow.l_leftNeighborRank   = (l_blockPositionX > 0) ? l_gpiRank-l_blocksY : -1;
   l_flow.l_rightNeighborRank  = (l_blockPositionX < l_blocksX-1) ? l_gpiRank+l_blocksY : -1;
   l_flow.l_bottomNeighborRank = (l_blockPositionY > 0) ? l_gpiRank-1 : -1;
   l_flow.l_topNeighborRank    = (l_blockPositionY < l_blocksY-1) ? l_gpiRank+1 : -1;
 
-  // print the MPI grid
-  tools::Logger::logger.cout() << "neighbors: "
-                     << l_flow.l_leftNeighborRank << " (left), "
-                     << l_flow.l_rightNeighborRank << " (right), "
-                     << l_flow.l_bottomNeighborRank << " (bottom), "
-                     << l_flow.l_topNeighborRank << " (top)" << std::endl;
-
   // intially exchange ghost and copy layers
   free(l_flow.segment_id_lr);
   free(l_flow.size_lr);
-  l_flow.segment_id_lr = (gaspi_segment_id_t *) calloc (l_flow.l_nleftOutflowOffset, sizeof(gaspi_segment_id_t));
-  l_flow.size_lr = (gaspi_size_t *) calloc (l_flow.l_nleftOutflowOffset, sizeof(gaspi_size_t));
-  exchangeLeftRightGhostLayers( l_flow,
-                                l_gpiRank
-                              );
-  
-  tools::Logger::logger.cout() << "Exchanged initial left right ghost layers." << std::endl;
+  l_flow.segment_id_lr = (gaspi_segment_id_t *) calloc (l_flow.l_nleftOutflowOffset,
+                                                        sizeof(gaspi_segment_id_t));
+  l_flow.size_lr = (gaspi_size_t *) calloc (l_flow.l_nleftOutflowOffset,
+                                            sizeof(gaspi_size_t));
+  exchangeLeftRightGhostLayers ();
   free(l_flow.segment_id_bt);
   free(l_flow.size_bt);
-  l_flow.segment_id_bt = (gaspi_segment_id_t *) calloc (l_flow.l_nbottomOutflowOffset, sizeof(gaspi_segment_id_t));
-  l_flow.size_bt = (gaspi_size_t *) calloc (l_flow.l_nbottomOutflowOffset, sizeof(gaspi_size_t));
-  exchangeBottomTopGhostLayers( l_flow,
-                                l_gpiRank
-                              );
+  l_flow.segment_id_bt = (gaspi_segment_id_t *) calloc (l_flow.l_nbottomOutflowOffset,
+                                                        sizeof(gaspi_segment_id_t));
+  l_flow.size_bt = (gaspi_size_t *) calloc (l_flow.l_nbottomOutflowOffset,
+                                            sizeof(gaspi_size_t));
+  exchangeBottomTopGhostLayers ();
   ASSERT(gaspi_barrier(GASPI_GROUP_ALL, GASPI_BLOCK));
-  tools::Logger::logger.cout() << "Exchanged initial top bottom ghost layers." << std::endl;
-  io::BoundarySize l_boundarySize = {{1, 1, 1, 1}};
-  std::string l_fileName = generateBaseFileName(l_baseName,l_blockPositionX,l_blockPositionY);
+  l_fileName = generateBaseFileName(l_baseName,l_blockPositionX,l_blockPositionY);
   l_writer = io::Writer::createWriterInstance(
           l_fileName,
-          l_newWaveBlock->getBathymetry(),
+          l_waveBlock->getBathymetry(),
           l_boundarySize,
           l_nXLocal, l_nYLocal,
           l_dX, l_dY,
@@ -946,13 +736,12 @@ gaspi_return_t recalculateRedistribute(gaspi_rank_t l_gpiRank,
   return GASPI_SUCCESS;
 }
 
-gaspi_offset_t *calculateOffsets(Float2D& grid, BoundaryEdge edge, BoundaryType type)
+gaspi_offset_t *GPI_SWE::calculateOffsets(Float2D& grid, BoundaryEdge edge, BoundaryType type)
 {
   int rows = grid.getRows(); /*nY*/
   int cols = grid.getCols(); /*nX*/
   float *base = grid.elemVector();
   gaspi_offset_t *offset = NULL;
-  //tools::Logger::logger.cout() << "rows = " << rows << " cols = " << cols << std::endl;
   switch(edge)
   {
     case BND_LEFT:
@@ -961,12 +750,10 @@ gaspi_offset_t *calculateOffsets(Float2D& grid, BoundaryEdge edge, BoundaryType 
         float *first_ele = grid.getColProxy(1).elemVector();
         gaspi_offset_t start = first_ele - base;
         offset = (gaspi_offset_t *) calloc (rows, sizeof(gaspi_offset_t));
-        //tools::Logger::logger.cout() << "left outflow offsets = " << std::endl;
         for(int i = 0; i < rows; i++)
         {
           /*second row of grid*/
-          offset[i] = (start + i) * sizeof(float);
-          //std::cout << offset[i] << "\t"; 
+          offset[i] = (start + i) * sizeof(float); 
         }
       }
       else if (type == INFLOW)
@@ -974,12 +761,10 @@ gaspi_offset_t *calculateOffsets(Float2D& grid, BoundaryEdge edge, BoundaryType 
         float *first_ele = grid.getColProxy(0).elemVector();
         gaspi_offset_t start = first_ele - base;
         offset = (gaspi_offset_t *) calloc (rows, sizeof(gaspi_offset_t));
-        //tools::Logger::logger.cout() << "left inflow offsets = " << std::endl;
         for(int i = 0; i < rows; i++)
         {
           /*first row of grid*/
           offset[i] = (start + i) * sizeof(float);
-          //std::cout << offset[i] << "\t"; 
         }
       }
       break;
@@ -989,12 +774,10 @@ gaspi_offset_t *calculateOffsets(Float2D& grid, BoundaryEdge edge, BoundaryType 
         float *first_ele = grid.getColProxy(cols-2).elemVector();
         gaspi_offset_t start = first_ele - base;
         offset = (gaspi_offset_t *) calloc (rows, sizeof(gaspi_offset_t));
-        //tools::Logger::logger.cout() << "right outflow offsets = " << std::endl;
         for(int i = 0; i < rows; i++)
         {
           /*second last row of grid*/
           offset[i] = (start + i) * sizeof(float); 
-          //std::cout << offset[i] << "\t";
         }
       }
       else if (type == INFLOW)
@@ -1002,12 +785,10 @@ gaspi_offset_t *calculateOffsets(Float2D& grid, BoundaryEdge edge, BoundaryType 
         float *first_ele = grid.getColProxy(cols-1).elemVector();
         gaspi_offset_t start = first_ele - base;
         offset = (gaspi_offset_t *) calloc (rows, sizeof(gaspi_offset_t));
-        //tools::Logger::logger.cout() << "right inflow offsets = " << std::endl;
         for(int i = 0; i < rows; i++)
         {
           /*Last row of grid*/
           offset[i] = (start + i) * sizeof(float); 
-          //std::cout << offset[i] << "\t";
         }
       }
       break;
@@ -1017,28 +798,22 @@ gaspi_offset_t *calculateOffsets(Float2D& grid, BoundaryEdge edge, BoundaryType 
         float *first_ele = grid.getRowProxy(1).elemVector();
         gaspi_offset_t start = first_ele - base;
         offset = (gaspi_offset_t *) calloc (cols, sizeof(gaspi_offset_t));
-        //tools::Logger::logger.cout() << "bottom outflow offsets = " << std::endl;
         for(int i = 0; i < cols; i++)
         {
           /*second col of grid*/
           offset[i] = (start + (rows)*i) * sizeof(float);
-          //std::cout << offset[i] << "\t"; 
         }
-        //tools::Logger::logger.cout() << std::endl;
       }
       else if (type == INFLOW)
       {
         float *first_ele = grid.getRowProxy(0).elemVector();
         gaspi_offset_t start = first_ele - base;
         offset = (gaspi_offset_t *) calloc (cols, sizeof(gaspi_offset_t));
-        //tools::Logger::logger.cout() << "bottom inflow offsets = " << std::endl;
         for(int i = 0; i < cols; i++)
         {
           /*first col of grid*/
           offset[i] = (start + (rows)*i) * sizeof(float);
-          //std::cout << offset[i] << "\t"; 
         }
-        //tools::Logger::logger.cout() << std::endl;
       }
       break;
     case BND_TOP:
@@ -1047,37 +822,29 @@ gaspi_offset_t *calculateOffsets(Float2D& grid, BoundaryEdge edge, BoundaryType 
         float *first_ele = grid.getRowProxy(rows-2).elemVector();
         gaspi_offset_t start = first_ele - base;
         offset = (gaspi_offset_t *) calloc (cols, sizeof(gaspi_offset_t));
-        //tools::Logger::logger.cout() << "top outflow offsets = " << std::endl;
         for(int i = 0; i < cols; i++)
         {
           /*second last col of grid*/
           offset[i] = (start + (rows)*i) * sizeof(float); 
-          //std::cout << offset[i] << "\t";
         }
-        //tools::Logger::logger.cout() << std::endl;
       }
       else if (type == INFLOW)
       {
         float *first_ele = grid.getRowProxy(rows-1).elemVector();
         gaspi_offset_t start = first_ele - base;
         offset = (gaspi_offset_t *) calloc (cols, sizeof(gaspi_offset_t));
-        //tools::Logger::logger.cout() << "top inflow offsets = " << std::endl;
         for(int i = 0; i < cols; i++)
         {
           /*Last col of grid*/
           offset[i] = (start + (rows)*i) * sizeof(float); 
-          //std::cout << offset[i] << "\t";
         }
-        //tools::Logger::logger.cout() << std::endl;
       }
       break;  
   }
   return offset;
 }
 
-void exchangeLeftRightGhostLayers( flow_info_t &l_flow,
-                                   gaspi_rank_t l_gpiRank
-                                  )
+void GPI_SWE::exchangeLeftRightGhostLayers ()
 { 
   gaspi_notification_id_t id = l_gpiRank, fid;
   gaspi_notification_t val = 1;
@@ -1105,9 +872,7 @@ void exchangeLeftRightGhostLayers( flow_info_t &l_flow,
                                      0,
                                      GASPI_BLOCK));
       ASSERT(gaspi_wait(0, GASPI_BLOCK));
-      //tools::Logger::logger.cout() << id << ": sent segment " << j << std::endl;
     }
-    //tools::Logger::logger.cout() << "sent data to my left neighbor" << std::endl;
   }
   
   // send to right, receive from the left:
@@ -1134,9 +899,7 @@ void exchangeLeftRightGhostLayers( flow_info_t &l_flow,
                                     0,
                                     GASPI_BLOCK));
       ASSERT(gaspi_wait(0, GASPI_BLOCK));
-      //tools::Logger::logger.cout() << id << ": sent segment " << j << std::endl;
     }
-    //tools::Logger::logger.cout() << "sent data to my right neighbor" << std::endl;
   }
   if(l_flow.l_rightNeighborRank >= 0)
   {
@@ -1146,9 +909,7 @@ void exchangeLeftRightGhostLayers( flow_info_t &l_flow,
       ASSERT(gaspi_notify_waitsome(j, l_flow.l_rightNeighborRank, 1, &fid, GASPI_BLOCK));
       val = 0;
       ASSERT (gaspi_notify_reset(j, fid, &val));
-      //tools::Logger::logger.cout() << id << ": received segment " << j << std::endl;
     }
-    //tools::Logger::logger.cout() << "received data from my right neighbor" << std::endl;
   }
   if(l_flow.l_leftNeighborRank >= 0)
   {
@@ -1158,15 +919,11 @@ void exchangeLeftRightGhostLayers( flow_info_t &l_flow,
       ASSERT(gaspi_notify_waitsome(j, l_flow.l_leftNeighborRank, 1, &fid, GASPI_BLOCK));
       val = 0;
       ASSERT (gaspi_notify_reset(j, fid, &val));
-      //tools::Logger::logger.cout() << id << ": received segment " << j << std::endl;
     }
-    //tools::Logger::logger.cout() << "received data from my left neighbor" << std::endl;
   }
 }
 
-void exchangeBottomTopGhostLayers( flow_info_t &l_flow,
-                                   gaspi_rank_t l_gpiRank
-                                  )
+void GPI_SWE::exchangeBottomTopGhostLayers ()
 {
   // send to bottom, receive from the top:
   gaspi_notification_id_t id = l_gpiRank, fid;
@@ -1196,7 +953,6 @@ void exchangeBottomTopGhostLayers( flow_info_t &l_flow,
                                      GASPI_BLOCK));
       ASSERT(gaspi_wait(0, GASPI_BLOCK));
     }
-    //tools::Logger::logger.cout() << "sent data to my bottom neighbor" << std::endl;
   }
   
   // send to top, receive from the bottom:
@@ -1224,7 +980,6 @@ void exchangeBottomTopGhostLayers( flow_info_t &l_flow,
                                      GASPI_BLOCK));
       ASSERT(gaspi_wait(0, GASPI_BLOCK));
     }
-    //tools::Logger::logger.cout() << "sent data to my top neighbor" << std::endl;
   }
   if(l_flow.l_topNeighborRank >= 0)
   {
@@ -1234,7 +989,6 @@ void exchangeBottomTopGhostLayers( flow_info_t &l_flow,
       val = 0;
       ASSERT (gaspi_notify_reset(j, fid, &val));
     }
-    //tools::Logger::logger.cout() << "received data from my top neighbor" << std::endl;
   }
   if(l_flow.l_bottomNeighborRank >= 0)
   {
@@ -1244,6 +998,5 @@ void exchangeBottomTopGhostLayers( flow_info_t &l_flow,
       val = 0;
       ASSERT (gaspi_notify_reset(j, fid, &val));
     }
-    //tools::Logger::logger.cout() << "received data from my bottom neighbor" << std::endl;
   }
 }
