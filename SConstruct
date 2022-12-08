@@ -334,7 +334,6 @@ if 'libGPI2Dir' in env:
 if env['parallelization'] in ['gpi', 'gpi_dynamic']:
   env.Append(CPPDEFINES=['USEGPI'])
   env.Append(CPPDEFINES=['GPI2_STATS'])
-  env.Append(LIBS=['GPI2_pmix'])
   if env['compileMode'] == 'debug':
     env.Append(LIBS=['GPI2-dbg'])
   else:
