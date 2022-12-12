@@ -97,8 +97,10 @@ SWE_WavePropagationBlock::SWE_WavePropagationBlock (int l_nx,
                                                     float l_dy,
                                                     Float2D& l_h,
                                                     Float2D& l_hu,
-                                                    Float2D& l_hv) :
-	SWE_Block (l_nx, l_ny, l_dx, l_dy, l_h, l_hu, l_hv),
+                                                    Float2D& l_hv,
+													float l_offsetX = 0,
+													float l_offsetY = 0) :
+	SWE_Block (l_nx, l_ny, l_dx, l_dy, l_h, l_hu, l_hv, l_offsetX, l_offsetY),
 	hNetUpdatesLeft (nx + 1, ny),
 	hNetUpdatesRight (nx + 1, ny),
 	huNetUpdatesLeft (nx + 1, ny),

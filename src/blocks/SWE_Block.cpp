@@ -68,10 +68,12 @@ SWE_Block* SWE_Block::getBlockInstance(float nx, float ny, float dx, float dy) {
 }
 
 SWE_Block* SWE_Block::getBlockInstance(float nx, float ny, float dx, float dy,
-                                       Float2D &h, Float2D &hu, Float2D &hv) {
+                                       Float2D &h, Float2D &hu, Float2D &hv,
+                                       float offsetX = 0, float offsetY = 0) {
   #if !defined(CUDA)
     #if defined(SOLVER_FWAVE) || defined(SOLVER_AUGRIE) || defined(SOLVER_HLLE)
-        SWE_Block *block = new SWE_WavePropagationBlock(nx, ny, dx, dy, h, hu, hv);
+        SWE_Block *block = new SWE_WavePropagationBlock(nx, ny, dx, dy, h, hu,
+                                                        hv, offsetX, offsetY);
     #elif defined(SOLVER_RUSANOV)
         SWE_Block *block = new SWE_RusanovBlock(nx,ny,dx,dy);
     #elif defined(SOLVER_AUGRIE_SIMD)
@@ -112,12 +114,13 @@ SWE_Block::SWE_Block(int l_nx, int l_ny,
 }
 
 SWE_Block::SWE_Block(int l_nx, int l_ny, float l_dx, float l_dy,
-           Float2D& l_h, Float2D& l_hu, Float2D& l_hv)
+                     Float2D& l_h, Float2D& l_hu, Float2D& l_hv, 
+                     float l_offsetX = 0, float l_offsetY = 0)
 	: nx(l_nx), ny(l_ny),
 	  dx(l_dx), dy(l_dy),
 	  h(l_h, true), hu(l_hu, true), hv(l_hv, true), b(nx+2, ny+2),
 	  // This three are only set here, so eclipse does not complain
-	  maxTimestep(0), offsetX(0), offsetY(0)
+	  maxTimestep(0), offsetX(l_offsetX), offsetY(l_offsetY)
 {
   // set WALL as default boundary condition
   for (int i=0; i<4; i++) {
