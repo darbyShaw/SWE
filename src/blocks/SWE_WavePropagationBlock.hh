@@ -103,9 +103,8 @@ private:
                             Float2D& l_h,
                             Float2D& l_hu,
                             Float2D& l_hv,
-                            float l_offsetX,
-                            float l_offsetY);
-
+                            float l_offsetX = 0,
+                            float l_offsetY = 0);
     //computes the net-updates for the block
     void computeNumericalFluxes();
 

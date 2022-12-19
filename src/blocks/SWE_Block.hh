@@ -118,7 +118,7 @@ class SWE_Block {
     static SWE_Block* getBlockInstance(float nx, float ny, float dx, float dy);
     static SWE_Block* getBlockInstance(float nx, float ny, float dx, float dy,
                                        Float2D &h, Float2D &hu, Float2D &hv,
-                                       float offsetX, float offsetY);
+                                       float offsetX = 0, float offsetY = 0);
   // object methods
     /// initialise unknowns to a specific scenario:
     void initScenario(float _offsetX, float _offsetY,
@@ -208,8 +208,8 @@ class SWE_Block {
     SWE_Block(int l_nx, int l_ny,
     		float l_dx, float l_dy);
     SWE_Block(int l_nx, int l_ny, float l_dx, float l_dy,
-           Float2D& l_h, Float2D& l_hu, Float2D& l_hv,
-           float l_offsetX, float offsetY);
+              Float2D& l_h, Float2D& l_hu, Float2D& l_hv,
+              float l_offsetX = 0, float offsetY = 0);
 
     // Sets the bathymetry on outflow and wall boundaries
     void setBoundaryBathymetry();
