@@ -156,8 +156,9 @@ GPI_SWE::GPI_SWE (int l_argc, char** l_argv) :
   ASSERT(gaspi_proc_init(GASPI_BLOCK));
   ASSERT(gaspi_proc_rank(&l_gpiRank));
   ASSERT(gaspi_proc_num(&l_numberOfProcesses));
+  std::cerr << "my rank " << l_gpiRank << " number of procs " << l_numberOfProcesses << std::endl;
   tools::Logger::logger.setProcessRank(l_gpiRank);
-  tools::Logger::logger.printWelcomeMessage();
+  //tools::Logger::logger.printWelcomeMessage();
   // set current wall clock time within the solver
   tools::Logger::logger.initWallClockTime(time(NULL));
   tools::Logger::logger.printNumberOfProcesses(l_numberOfProcesses);
@@ -388,6 +389,19 @@ void GPI_SWE::collectStepbyStepStats (int spawned_procs)
     *spawnFile << total_group_construct << std::endl;
   }
   GPI2_STATS_RESET_TIMER (GASPI_GROUP_CONSTRUCT_TIMER);
+  /*Collect the time required to connect PMIx namespaces.*/
+  float connect_nspace = GPI2_STATS_GET_TIMER (GASPI_PMIX_CONNECT_TIMER)/1000;
+  /*Average it out over the procs involved*/
+  float total_connect_nspace = 0;
+  gaspi_allreduce(&connect_nspace, &total_connect_nspace, 1,
+                  GASPI_OP_SUM, GASPI_TYPE_FLOAT, GASPI_GROUP_ALL, GASPI_BLOCK);
+  if (l_gpiRank == 0)
+  {
+    total_connect_nspace /= l_numberOfProcesses;
+    std::ofstream *spawnFile = createFile ("connect_nspace", spawned_procs);
+    *spawnFile << total_connect_nspace << std::endl;
+  }
+  GPI2_STATS_RESET_TIMER (GASPI_PMIX_CONNECT_TIMER);
   /*Collect the time required to init/reinit gaspi core.*/
   float init_core = GPI2_STATS_GET_TIMER (GASPI_CORE_CONTEXT_INIT_TIMER)/1000;
   /*Average it out over the procs involved*/
@@ -427,17 +441,24 @@ void GPI_SWE::collectStepbyStepStats (int spawned_procs)
     *spawnFile << sum_total_time << std::endl;
   }
   GPI2_STATS_RESET_TIMER (GASPI_TOTAL_RESOURCE_CHANGE_TIME);
+  GPI2_STATS_RESET_ALL_TIMERS;
+  GPI2_STATS_RESET_ALL_COUNTERS;
 }
 
 void GPI_SWE::startComputation ()
 {
   tools::Logger::logger.initWallClockTime(time(NULL));
   // loop over checkpoints
-  double l_lastIterTime = 0;
+  double l_lastIterTime = clock();
   double l_lastCheckTime = 0;
-  for(int c=l_startc; c<=l_numberOfCheckPoints; c++) {  
-    std::ofstream *iterFile = createFile ("iterations", c); 
-    std::ofstream *checkFile = createFile ("checkpoint", c);
+  std::ofstream *iterFile = NULL;
+  std::ofstream *checkFile = NULL;
+  for(int c=l_startc; c<=l_numberOfCheckPoints; c++) {
+    if (l_gpiRank == 0)
+    {
+      iterFile = createFile ("iterations", c); 
+      checkFile = createFile ("checkpoint", c);
+    }  
     while( l_t < l_checkPoints[c] ) {
       tools::Logger::logger.resetClockToCurrentTime("Cpu");
       exchangeLeftRightGhostLayers ();

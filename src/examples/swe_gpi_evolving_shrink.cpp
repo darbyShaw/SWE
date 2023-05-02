@@ -376,11 +376,17 @@ void GPI_SWE::startComputation ()
 {
   tools::Logger::logger.initWallClockTime(time(NULL));
   // loop over checkpoints
-  double l_lastIterTime = 0;
+  double l_lastIterTime = clock();
   double l_lastCheckTime = 0;
+  std::ofstream *iterFile = NULL;
+  std::ofstream *checkFile = NULL;
   for(int c=l_startc; c<=l_numberOfCheckPoints; c++) {  
-    std::ofstream *iterFile = createFile ("iterations", c); 
-    std::ofstream *checkFile = createFile ("checkpoint", c);
+    if (l_gpiRank == 0)
+    {
+      iterFile = createFile ("iterations", c); 
+      checkFile = createFile ("checkpoint", c);
+    }
+    
     while( l_t < l_checkPoints[c] ) {
       tools::Logger::logger.resetClockToCurrentTime("Cpu");
       exchangeLeftRightGhostLayers ();
